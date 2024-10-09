@@ -1,5 +1,6 @@
 import streamlit as st
-from langchain.vectorstores import Pinecone
+import pinecone
+from langchain.vectorstores import Pinecone as LangchainPinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
@@ -47,17 +48,16 @@ st.markdown(
 )
 
 # Initialize Pinecone
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment=os.getenv("PINECONE_ENVIRONMENT"))
 
 # Load the Pinecone index
-index_name = "spanos"
-index = pc.Index(index_name)
+index = pinecone.Index(os.getenv('INDEX_NAME'))
 
 # Initialize OpenAI embeddings
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 # Create Pinecone vector store
-vectorstore = Pinecone(index, embeddings.embed_query, "text")
+vectorstore = LangchainPinecone.from_existing_index(index_name=os.getenv('INDEX_NAME'), embedding=embeddings, namespace=os.getenv('PINECONE_NAMESPACE', ''))
 
 # Initialize ChatOpenAI
 llm = ChatOpenAI(
