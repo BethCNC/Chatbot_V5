@@ -17,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS to use MabryPro font and align styles with Figma design
+# Custom CSS (unchanged)
 st.markdown(
     """
     <style>
@@ -33,7 +33,6 @@ st.markdown(
         color: #4A4A4A;
     }
 
-    /* Customize input box */
     .stTextInput label {
         font-size: 18px;
         color: #FF5A7C;
@@ -46,13 +45,11 @@ st.markdown(
         font-size: 16px;
     }
 
-    /* Customize sidebar */
     .stSidebar {
         background-color: #FFF4F4;
         padding: 10px;
     }
 
-    /* Disclaimer styling */
     .stSidebar .sidebar-content .stImage {
         width: 35px;
         height: 35px;
@@ -65,7 +62,6 @@ st.markdown(
         font-size: 14px;
     }
 
-    /* Chat messages */
     .user-message {
         background-color: #FFEBF0;
         padding: 10px;
@@ -79,7 +75,6 @@ st.markdown(
         margin-bottom: 10px;
     }
 
-    /* Footer */
     footer {
         font-size: 12px;
         text-align: center;
@@ -91,76 +86,83 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Initialize Pinecone
-pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1-aws")
+@st.cache_resource
+def initialize_pinecone():
+    pinecone_api_key = os.getenv("PINECONE_API_KEY")
+    pinecone_environment = os.getenv("PINECONE_ENVIRONMENT")
+    pinecone_index_name = os.getenv("PINECONE_INDEX")
 
-# Load the Pinecone index
-index_name = "spanos"
-index = pinecone.Index(index_name)
+    if not all([pinecone_api_key, pinecone_environment, pinecone_index_name]):
+        raise ValueError("Missing Pinecone environment variables. Please check your .env file.")
 
-# Initialize OpenAI embeddings
-embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+    pc = pinecone.Pinecone(api_key=pinecone_api_key)
+    return pc.Index(pinecone_index_name)
 
-# Create Pinecone vector store
-vectorstore = LangchainPinecone.from_existing_index(
-    index_name=index_name,
-    embedding=embeddings,
-    text_key="text",
-    namespace=""  # Use an empty string if you're not using a specific namespace
-)
+@st.cache_resource
+def initialize_qa_chain():
+    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
+    pc = pinecone.Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+    vectorstore = LangchainPinecone.from_existing_index(
+        index_name=os.getenv("PINECONE_INDEX"),
+        embedding=embeddings,
+        text_key="text",
+        namespace="",
+        pinecone_client=pc
+    )
+    llm = ChatOpenAI(
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
+        model_name="gpt-3.5-turbo",
+        temperature=0.7
+    )
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        return_source_documents=True
+    )
 
-# Initialize ChatOpenAI
-llm = ChatOpenAI(
-    openai_api_key=os.getenv("OPENAI_API_KEY"),
-    model_name="gpt-3.5-turbo",
-    temperature=0.7
-)
+def main():
+    st.title("Dr. Spanos EDS Chatbot")
+    st.subheader("This Chatbot is specifically trained on Dr. Spanos Research")
 
-# Create ConversationalRetrievalChain
-qa = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectorstore.as_retriever(),
-    return_source_documents=True
-)
+    # Initialize Pinecone and QA chain
+    try:
+        index = initialize_pinecone()
+        qa = initialize_qa_chain()
+    except Exception as e:
+        st.error(f"Error initializing the application: {e}")
+        st.stop()
 
-# Streamlit UI
-st.title("Dr. Spanos EDS Chatbot")
-st.subheader("This Chatbot is specifically trained on Dr. Spanos Research")
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-# Initialize chat history if it doesn't exist
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # Display chat history
+    for message in st.session_state.messages:
+        role = "User" if message["role"] == "user" else "Assistant"
+        st.markdown(f'<div class="{message["role"]}-message">**{role}:** {message["content"]}</div>', unsafe_allow_html=True)
 
-# Display chat history
-for message in st.session_state.messages:
-    if message["role"] == "user":
-        st.markdown(f'<div class="user-message">**User:** {message["content"]}</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div class="assistant-message">**Assistant:** {message["content"]}</div>', unsafe_allow_html=True)
+    # User input
+    user_input = st.text_input("What would you like to know about EDS?", key="user_input")
 
-# Accept user input
-user_input = st.text_input("What would you like to know about EDS?", key="user_input")
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        with st.spinner("Generating response..."):
+            result = qa({"question": user_input, "chat_history": [(m["role"], m["content"]) for m in st.session_state.messages if m["role"] == "user"]})
+        
+        response = result["answer"]
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.rerun()
 
-if user_input:
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    # Sidebar
+    st.sidebar.image("assets/Disclaimer.png", width=35)
+    st.sidebar.warning("""
+        **Disclaimer:** This chatbot is for educational purposes only. The information provided should not be considered medical advice. 
+        Please consult with a healthcare professional for medical concerns.
+    """)
 
-    # Generate AI response
-    result = qa({"question": user_input, "chat_history": [(m["role"], m["content"]) for m in st.session_state.messages if m["role"] == "user"]})
-    response = result["answer"]
-    
-    # Add assistant response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    # Footer
+    st.markdown("<footer>Made with Streamlit</footer>", unsafe_allow_html=True)
 
-    # Clear the input field
-    st.experimental_rerun()
-
-# Display disclaimer in the sidebar
-st.sidebar.image("assets/Disclaimer.png", width=35)  # Reduced the size
-st.sidebar.warning("""
-    **Disclaimer:** This chatbot is for educational purposes only. The information provided should not be considered medical advice. 
-    Please consult with a healthcare professional for medical concerns.
-""")
-
-# Footer
-st.markdown("<footer>Made with Streamlit</footer>", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()
