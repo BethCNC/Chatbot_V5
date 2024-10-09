@@ -36,17 +36,22 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Debugging: Print environment variables to ensure they are correctly loaded
+st.write(f"Using Pinecone Index: {os.getenv('PINECONE_INDEX')}")
+st.write(f"Using Pinecone Environment: {os.getenv('PINECONE_ENV')}")
+st.write(f"Using OpenAI API Key: {os.getenv('OPENAI_API_KEY')}")
+
 # Initialize Pinecone
-pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment=os.getenv("PINECONE_ENVIRONMENT"))
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment=os.getenv("PINECONE_ENV"))
 
 # Load the Pinecone index
-index = pinecone.Index(os.getenv('INDEX_NAME'))
+index = pinecone.Index(os.getenv('PINECONE_INDEX'))
 
 # Initialize OpenAI embeddings
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 # Create Pinecone vector store
-vectorstore = LangchainPinecone.from_existing_index(index_name=os.getenv('INDEX_NAME'), embedding=embeddings, namespace=os.getenv('PINECONE_NAMESPACE', ''))
+vectorstore = LangchainPinecone.from_existing_index(index_name=os.getenv('PINECONE_INDEX'), embedding=embeddings, namespace=os.getenv('PINECONE_NAMESPACE', ''))
 
 # Initialize ChatOpenAI
 llm = ChatOpenAI(
@@ -65,34 +70,36 @@ qa = ConversationalRetrievalChain.from_llm(
 # Streamlit UI
 st.title("Dr. Spanos EDS Chatbot")
 
-# Initialize chat history
+# Initialize chat history if it doesn't exist
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat messages from history on app rerun
+# Display chat history
+st.markdown("### Chat History")
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    if message["role"] == "user":
+        st.markdown(f"**User:** {message['content']}")
+    else:
+        st.markdown(f"**Assistant:** {message['content']}")
 
 # Accept user input
-if prompt := st.chat_input("What would you like to know about EDS?"):
+user_input = st.text_input("What would you like to know about EDS?", key="user_input")
+
+if user_input:
     # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    # Display user message in chat message container
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
     # Generate AI response
-    result = qa({"question": prompt, "chat_history": [(m["role"], m["content"]) for m in st.session_state.messages]})
+    result = qa({"question": user_input, "chat_history": [(m["role"], m["content"]) for m in st.session_state.messages if m["role"] == "user"]})
     response = result["answer"]
     
-    # Display assistant response in chat message container
-    with st.chat_message("assistant"):
-        st.markdown(response)
     # Add assistant response to chat history
     st.session_state.messages.append({"role": "assistant", "content": response})
 
-# Display disclaimer
+    # Clear the input field
+    st.experimental_rerun()
+
+# Display disclaimer in the sidebar
 st.sidebar.image("assets/Disclaimer.png", width=50)
 st.sidebar.warning("""
     **Disclaimer:** This chatbot is for educational purposes only. The information provided should not be considered medical advice. 
