@@ -4,7 +4,6 @@ from langchain.vectorstores import Pinecone as LangchainPinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
-from pinecone import Pinecone
 import os
 from dotenv import load_dotenv
 
@@ -31,16 +30,6 @@ st.markdown(
     
     * {
         font-family: 'MabryPro', sans-serif;
-    }
-    
-    .stTextInput > div > div > input {
-        background-color: #f0f2f6;
-    }
-    
-    .stChat {
-        border-radius: 10px;
-        padding: 10px;
-        margin-bottom: 10px;
     }
     </style>
     """,
@@ -82,7 +71,7 @@ if "messages" not in st.session_state:
 
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
-    with st.chat_message(message["role"], avatar=message["avatar"]):
+    with st.chat_message(message["role"], avatar=message.get("avatar")):
         st.markdown(message["content"])
 
 # Accept user input
@@ -105,7 +94,7 @@ if prompt := st.chat_input("What would you like to know about EDS?"):
 
 # Display disclaimer
 st.sidebar.image("assets/Disclaimer.png", width=50)
-st.sidebar.markdown("""
+st.sidebar.warning("""
     **Disclaimer:** This chatbot is for educational purposes only. The information provided should not be considered medical advice. 
     Please consult with a healthcare professional for medical concerns.
 """)
