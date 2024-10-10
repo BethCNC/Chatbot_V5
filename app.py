@@ -1,8 +1,7 @@
 import streamlit as st
-import pinecone
-from langchain.vectorstores import Pinecone as LangchainPinecone
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
+from pinecone import Pinecone
+from langchain_pinecone import PineconeVectorStore
+from langchain_openai import OpenAIEmbeddings
 from langchain.chains import ConversationalRetrievalChain
 import os
 from dotenv import load_dotenv
@@ -89,26 +88,31 @@ st.markdown(
 @st.cache_resource
 def initialize_pinecone():
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
-    pinecone_environment = os.getenv("PINECONE_ENVIRONMENT")
     pinecone_index_name = os.getenv("PINECONE_INDEX")
 
-    if not all([pinecone_api_key, pinecone_environment, pinecone_index_name]):
+    if not all([pinecone_api_key, pinecone_index_name]):
         raise ValueError("Missing Pinecone environment variables. Please check your .env file.")
 
-    pc = pinecone.Pinecone(api_key=pinecone_api_key)
+    pc = Pinecone(api_key=pinecone_api_key)
+    if pinecone_index_name is None:
+        raise ValueError("PINECONE_INDEX environment variable is not set")
     return pc.Index(pinecone_index_name)
 
 @st.cache_resource
 def initialize_qa_chain():
-    embeddings = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
-    pc = pinecone.Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-    vectorstore = LangchainPinecone.from_existing_index(
-        index_name=os.getenv("PINECONE_INDEX"),
-        embedding=embeddings,
-        text_key="text",
-        namespace="",
-        pinecone_client=pc
-    )
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    pinecone_api_key = os.getenv("PINECONE_API_KEY")
+    pinecone_index_name = os.getenv("PINECONE_INDEX")
+
+    if not all([openai_api_key, pinecone_api_key, pinecone_index_name]):
+        raise ValueError("Missing environment variables. Please check your .env file.")
+
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    pc = Pinecone(api_key=pinecone_api_key)
+    index = pc.Index(pinecone_index_name)
+    
+    vectorstore = LangchainPinecone(index, embeddings.embed_query, "text")
+    
     llm = ChatOpenAI(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         model_name="gpt-3.5-turbo",
