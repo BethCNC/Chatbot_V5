@@ -1,172 +1,89 @@
-import streamlit as st
-from pinecone import Pinecone
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
-from langchain.chains import ConversationalRetrievalChain
 import os
+import streamlit as st
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.vectorstores import Pinecone
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
+from pinecone import Pinecone as PineconeClient
 
 # Load environment variables
 load_dotenv()
 
-# Streamlit page configuration
-st.set_page_config(
-    page_title="Dr. Spanos EDS Chatbot",
-    page_icon="assets/favicon.ico",
-    layout="wide"
+# Initialize Pinecone
+pc = PineconeClient(api_key=os.getenv("PINECONE_API_KEY"))
+
+# Custom CSS (keep your existing CSS here)
+st.markdown("""
+<style>
+    /* Your custom CSS */
+</style>
+""", unsafe_allow_html=True)
+
+# App title
+st.title('Chat with Dr. Spanos Ehler Danlos Research Articles')
+
+# Set OpenAI LLM and embeddings
+llm_chat = ChatOpenAI(temperature=0.3, max_tokens=150, model='gpt-4o-mini')
+embeddings = OpenAIEmbeddings()
+
+# Set Pinecone index
+index_name = os.getenv("PINECONE_INDEX_NAME")
+if index_name is None:
+    raise ValueError("PINECONE_INDEX_NAME is not set in the environment variables")
+docsearch = Pinecone.from_existing_index(index_name=index_name, embedding=embeddings)
+
+# Create memory
+memory = ConversationBufferMemory(
+    memory_key="chat_history",
+    return_messages=True,
+    output_key="answer"
 )
 
-# Custom CSS (unchanged)
-st.markdown(
-    """
-    <style>
-    @font-face {
-        font-family: 'MabryPro';
-        src: url('assets/MabryPro-Regular.ttf') format('truetype');
-        font-weight: normal;
-        font-style: normal;
-    }
-    
-    * {
-        font-family: 'MabryPro', sans-serif;
-        color: #4A4A4A;
-    }
-
-    .stTextInput label {
-        font-size: 18px;
-        color: #FF5A7C;
-    }
-    .stTextInput input {
-        background-color: #F6F6F6;
-        border-radius: 12px;
-        border: 1px solid #FF5A7C;
-        padding: 10px;
-        font-size: 16px;
-    }
-
-    .stSidebar {
-        background-color: #FFF4F4;
-        padding: 10px;
-    }
-
-    .stSidebar .sidebar-content .stImage {
-        width: 35px;
-        height: 35px;
-    }
-
-    .stSidebar .sidebar-content .stAlert {
-        background-color: #FFF4F4;
-        color: #FF5A7C;
-        border-left: 6px solid #FF5A7C;
-        font-size: 14px;
-    }
-
-    .user-message {
-        background-color: #FFEBF0;
-        padding: 10px;
-        border-radius: 12px;
-        margin-bottom: 10px;
-    }
-    .assistant-message {
-        background-color: #F0F8FF;
-        padding: 10px;
-        border-radius: 12px;
-        margin-bottom: 10px;
-    }
-
-    footer {
-        font-size: 12px;
-        text-align: center;
-        margin-top: 50px;
-        color: #888;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
+# Create chain
+chain = ConversationalRetrievalChain.from_llm(
+    llm=llm_chat,
+    retriever=docsearch.as_retriever(search_kwargs={"k": 3}),
+    memory=memory,
+    return_source_documents=True,  # Explicitly request source documents
 )
 
-@st.cache_resource
-def initialize_pinecone():
-    pinecone_api_key = os.getenv("PINECONE_API_KEY")
-    pinecone_index_name = os.getenv("PINECONE_INDEX")
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    if not all([pinecone_api_key, pinecone_index_name]):
-        raise ValueError("Missing Pinecone environment variables. Please check your .env file.")
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-    pc = Pinecone(api_key=pinecone_api_key)
-    if pinecone_index_name is None:
-        raise ValueError("PINECONE_INDEX environment variable is not set")
-    return pc.Index(pinecone_index_name)
+# React to user input
+if prompt := st.chat_input("What do you want to know about EDS?"):
+    # Display user message in chat message container
+    st.chat_message("user").markdown(prompt)
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-@st.cache_resource
-def initialize_qa_chain():
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    pinecone_api_key = os.getenv("PINECONE_API_KEY")
-    pinecone_index_name = os.getenv("PINECONE_INDEX")
-
-    if not all([openai_api_key, pinecone_api_key, pinecone_index_name]):
-        raise ValueError("Missing environment variables. Please check your .env file.")
-
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-    pc = Pinecone(api_key=pinecone_api_key)
-    index = pc.Index(pinecone_index_name)
-    
-    vectorstore = LangchainPinecone(index, embeddings.embed_query, "text")
-    
-    llm = ChatOpenAI(
-        openai_api_key=os.getenv("OPENAI_API_KEY"),
-        model_name="gpt-3.5-turbo",
-        temperature=0.7
-    )
-    return ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vectorstore.as_retriever(),
-        return_source_documents=True
-    )
-
-def main():
-    st.title("Dr. Spanos EDS Chatbot")
-    st.subheader("This Chatbot is specifically trained on Dr. Spanos Research")
-
-    # Initialize Pinecone and QA chain
     try:
-        index = initialize_pinecone()
-        qa = initialize_qa_chain()
+        # Use the chain to get a response
+        response = chain({"question": prompt})
+        bot_response = response['answer']
+        
+        # Display assistant response in chat message container
+        with st.chat_message("assistant"):
+            st.markdown(bot_response)
+        # Add assistant response to chat history
+        st.session_state.messages.append({"role": "assistant", "content": bot_response})
+
+        # Display source documents
+        with st.expander("Source Documents"):
+            if 'source_documents' in response:
+                for doc in response['source_documents']:
+                    st.write(f"Source: {doc.metadata['source']}")
+                    st.write(doc.page_content)
+                    st.write("---")
+            else:
+                st.write("No source documents available for this response.")
     except Exception as e:
-        st.error(f"Error initializing the application: {e}")
-        st.stop()
-
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Display chat history
-    for message in st.session_state.messages:
-        role = "User" if message["role"] == "user" else "Assistant"
-        st.markdown(f'<div class="{message["role"]}-message">**{role}:** {message["content"]}</div>', unsafe_allow_html=True)
-
-    # User input
-    user_input = st.text_input("What would you like to know about EDS?", key="user_input")
-
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        
-        with st.spinner("Generating response..."):
-            result = qa({"question": user_input, "chat_history": [(m["role"], m["content"]) for m in st.session_state.messages if m["role"] == "user"]})
-        
-        response = result["answer"]
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        st.rerun()
-
-    # Sidebar
-    st.sidebar.image("assets/Disclaimer.png", width=35)
-    st.sidebar.warning("""
-        **Disclaimer:** This chatbot is for educational purposes only. The information provided should not be considered medical advice. 
-        Please consult with a healthcare professional for medical concerns.
-    """)
-
-    # Footer
-    st.markdown("<footer>Made with Streamlit</footer>", unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+        st.error(f"An error occurred: {str(e)}")
+        print(f"Error details: {e}")
