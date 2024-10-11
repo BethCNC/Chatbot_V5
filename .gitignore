@@ -9,3 +9,5 @@ config.py
 
 Chatbot_V5/test_pinecone.py
 Chatbot_V5/constants.py
+
+.env
